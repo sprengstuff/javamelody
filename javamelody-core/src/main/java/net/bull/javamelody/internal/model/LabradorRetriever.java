@@ -17,6 +17,7 @@
  */
 package net.bull.javamelody.internal.model;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -126,7 +127,7 @@ public class LabradorRetriever {
 		this(url, null);
 	}
 
-	LabradorRetriever(URL url, Map<String, String> headers) {
+	public LabradorRetriever(URL url, Map<String, String> headers) {
 		super();
 		assert url != null;
 		this.url = url;
@@ -141,15 +142,12 @@ public class LabradorRetriever {
 		final long start = System.currentTimeMillis();
 		int dataLength = -1;
 		try {
-			final URLConnection connection = openConnection(url, headers);
+			final URLConnection connection = openConnection();
 			// pour traductions (si on vient de CollectorServlet.forwardActionAndUpdateData,
 			// cela permet d'avoir les messages dans la bonne langue)
 			connection.setRequestProperty("Accept-Language", I18N.getCurrentLocale().getLanguage());
-			if (url.getUserInfo() != null) {
-				final String authorization = Base64Coder.encodeString(url.getUserInfo());
-				connection.setRequestProperty("Authorization", "Basic " + authorization);
-			}
-			// Rq: on ne gère pas pour l'instant les éventuels cookie de session http,
+
+			// Rq: on ne gère pas ici les éventuels cookie de session http,
 			// puisque le filtre de monitoring n'est pas censé créer des sessions
 			//		if (cookie != null) { connection.setRequestProperty("Cookie", cookie); }
 
@@ -157,6 +155,7 @@ public class LabradorRetriever {
 
 			//		final String setCookie = connection.getHeaderField("Set-Cookie");
 			//		if (setCookie != null) { cookie = setCookie; }
+
 			final CounterInputStream counterInputStream = new CounterInputStream(
 					connection.getInputStream());
 
@@ -206,18 +205,10 @@ public class LabradorRetriever {
 		final long start = System.currentTimeMillis();
 		int dataLength = -1;
 		try {
-			final URLConnection connection = openConnection(url, headers);
+			final URLConnection connection = openConnection();
 			// pour traductions
 			connection.setRequestProperty("Accept-Language",
 					httpRequest.getHeader("Accept-Language"));
-			if (url.getUserInfo() != null) {
-				final String authorization = Base64Coder.encodeString(url.getUserInfo());
-				connection.setRequestProperty("Authorization", "Basic " + authorization);
-			}
-			// Rq: on ne gère pas pour l'instant les éventuels cookie de session http,
-			// puisque le filtre de monitoring n'est pas censé créer des sessions
-			//		if (cookie != null) { connection.setRequestProperty("Cookie", cookie); }
-
 			connection.connect();
 			httpResponse.setContentType(connection.getContentType());
 			final OutputStream output = httpResponse.getOutputStream();
@@ -236,15 +227,7 @@ public class LabradorRetriever {
 		final long start = System.currentTimeMillis();
 		int dataLength = -1;
 		try {
-			final URLConnection connection = openConnection(url, headers);
-			if (url.getUserInfo() != null) {
-				final String authorization = Base64Coder.encodeString(url.getUserInfo());
-				connection.setRequestProperty("Authorization", "Basic " + authorization);
-			}
-			// Rq: on ne gère pas pour l'instant les éventuels cookie de session http,
-			// puisque le filtre de monitoring n'est pas censé créer des sessions
-			//		if (cookie != null) { connection.setRequestProperty("Cookie", cookie); }
-
+			final URLConnection connection = openConnection();
 			connection.connect();
 
 			dataLength = pump(output, connection);
@@ -275,15 +258,34 @@ public class LabradorRetriever {
 		return dataLength;
 	}
 
+	public void post(ByteArrayOutputStream payload) throws IOException {
+		final HttpURLConnection connection = (HttpURLConnection) openConnection();
+		connection.setRequestMethod("POST");
+		connection.setDoOutput(true);
+
+		if (payload != null) {
+			final OutputStream outputStream = connection.getOutputStream();
+			payload.writeTo(outputStream);
+			outputStream.flush();
+		}
+
+		final int status = connection.getResponseCode();
+		if (status >= HttpURLConnection.HTTP_BAD_REQUEST) {
+			final ByteArrayOutputStream errorOutputStream = new ByteArrayOutputStream();
+			TransportFormat.pump(connection.getErrorStream(), errorOutputStream);
+			final String msg = "Error connecting to " + url + '(' + status + "): "
+					+ errorOutputStream.toString("UTF-8");
+			throw new IOException(msg);
+		}
+		connection.disconnect();
+	}
+
 	/**
 	 * Ouvre la connection http.
-	 * @param url URL
-	 * @param headers Entêtes http
 	 * @return Object
 	 * @throws IOException   Exception de communication
 	 */
-	private static URLConnection openConnection(URL url, Map<String, String> headers)
-			throws IOException {
+	private URLConnection openConnection() throws IOException {
 		final URLConnection connection = url.openConnection();
 		connection.setUseCaches(false);
 		if (CONNECTION_TIMEOUT > 0) {
@@ -299,6 +301,10 @@ public class LabradorRetriever {
 			for (final Map.Entry<String, String> entry : headers.entrySet()) {
 				connection.setRequestProperty(entry.getKey(), entry.getValue());
 			}
+		}
+		if (url.getUserInfo() != null) {
+			final String authorization = Base64Coder.encodeString(url.getUserInfo());
+			connection.setRequestProperty("Authorization", "Basic " + authorization);
 		}
 		return connection;
 	}

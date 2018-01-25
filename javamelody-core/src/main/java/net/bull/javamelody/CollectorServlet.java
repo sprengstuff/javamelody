@@ -120,45 +120,57 @@ public class CollectorServlet extends HttpServlet {
 		}
 
 		// post du formulaire d'ajout d'application à monitorer
-		final String appName = req.getParameter("appName");
-		final String appUrls = req.getParameter("appUrls");
 		I18N.bindLocale(req.getLocale());
-		final CollectorController collectorController = new CollectorController(collectorServer);
 		try {
-			if (appName == null || appUrls == null) {
-				writeMessage(req, resp, collectorController, I18N.getString("donnees_manquantes"));
-				return;
-			}
-			if (!appUrls.startsWith("http://") && !appUrls.startsWith("https://")) {
-				writeMessage(req, resp, collectorController, I18N.getString("urls_format"));
-				return;
-			}
-			collectorController.addCollectorApplication(appName, appUrls);
-			LOGGER.info("monitored application added: " + appName);
-			LOGGER.info("urls of the monitored application: " + appUrls);
-			CollectorController.showAlertAndRedirectTo(resp,
-					I18N.getFormattedString("application_ajoutee", appName),
-					"?application=" + appName);
-		} catch (final FileNotFoundException e) {
-			final String message = I18N.getString("monitoring_configure");
-			LOGGER.warn(message, e);
-			writeMessage(req, resp, collectorController, message + '\n' + e.toString());
-		} catch (final StreamCorruptedException e) {
-			final String message = I18N.getFormattedString("reponse_non_comprise", appUrls);
-			LOGGER.warn(message, e);
-			writeMessage(req, resp, collectorController, message + '\n' + e.toString());
+			addCollectorApplication(req, resp);
 		} catch (final Exception e) {
 			LOGGER.warn(e.toString(), e);
-			writeMessage(req, resp, collectorController, e.toString());
+			final String userAgent = req.getHeader("User-Agent");
+			if (userAgent != null && userAgent.startsWith("Java")) {
+				resp.sendError(HttpServletResponse.SC_PRECONDITION_FAILED, e.toString());
+			} else {
+				final CollectorController collectorController = new CollectorController(
+						collectorServer);
+				final String application = collectorController.getApplication(req, resp);
+				collectorController.writeMessage(req, resp, application, e.toString());
+			}
 		} finally {
 			I18N.unbindLocale();
 		}
 	}
 
-	private void writeMessage(HttpServletRequest req, HttpServletResponse resp,
-			CollectorController collectorController, String message) throws IOException {
-		collectorController.writeMessage(req, resp, collectorController.getApplication(req, resp),
-				message);
+	private void addCollectorApplication(HttpServletRequest req, HttpServletResponse resp)
+			throws IOException {
+		final String appName = req.getParameter("appName");
+		final String appUrls = req.getParameter("appUrls");
+		final String action = req.getParameter("action");
+		try {
+			if (appName == null || appUrls == null) {
+				throw new IllegalArgumentException(I18N.getString("donnees_manquantes"));
+			}
+			if (!appUrls.startsWith("http://") && !appUrls.startsWith("https://")) {
+				throw new IllegalArgumentException(I18N.getString("urls_format"));
+			}
+			final CollectorController collectorController = new CollectorController(
+					collectorServer);
+			if ("unregisterNode".equals(action)) {
+				collectorController.removeCollectorApplicationNodes(appName, appUrls);
+				LOGGER.info("monitored application node removed: " + appName + ", url: " + appUrls);
+			} else {
+				collectorController.addCollectorApplication(appName, appUrls);
+				LOGGER.info("monitored application added: " + appName);
+				LOGGER.info("urls of the monitored application: " + appUrls);
+				CollectorController.showAlertAndRedirectTo(resp,
+						I18N.getFormattedString("application_ajoutee", appName),
+						"?application=" + appName);
+			}
+		} catch (final FileNotFoundException e) {
+			final String message = I18N.getString("monitoring_configure");
+			throw new IllegalStateException(message + '\n' + e.toString(), e);
+		} catch (final StreamCorruptedException e) {
+			final String message = I18N.getFormattedString("reponse_non_comprise", appUrls);
+			throw new IllegalStateException(message + '\n' + e.toString(), e);
+		}
 	}
 
 	/** {@inheritDoc} */

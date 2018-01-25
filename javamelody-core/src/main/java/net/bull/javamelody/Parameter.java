@@ -270,6 +270,13 @@ public enum Parameter {
 	ADMIN_EMAILS("admin-emails"),
 
 	/**
+	 * Used to specify prefix of the subject of the email notifications sent out by Javamelody.
+	 * Supports one argument index {0} which will be replaced by application name at runtime.<br>
+	 * For e.g. : Production environment JavaMelody Reports for {0} (Monitoring JavaMelody on {0} by default).
+	 */
+	MAIL_SUBJECT_PREFIX("mail-subject-prefix"),
+
+	/**
 	 * Liste des périodes d'envoi des mails séparées par des virgules
 	 * pour l'envoi par mail de rapport de hebdomadaire.
 	 * Les périodes doivent être "day", "week" ou "month" ("week" par défaut).

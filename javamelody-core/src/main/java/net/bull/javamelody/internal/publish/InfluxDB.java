@@ -15,23 +15,24 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package net.bull.javamelody.internal.model;
+package net.bull.javamelody.internal.publish;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
-import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.nio.charset.Charset;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
+import java.util.Collections;
 import java.util.Locale;
+import java.util.Map;
 
 import net.bull.javamelody.Parameter;
 import net.bull.javamelody.internal.common.LOG;
+import net.bull.javamelody.internal.model.LabradorRetriever;
 
 /**
  * Publish chart data to <a href='https://www.influxdata.com/time-series-platform/'>InfluxDB</a>.
@@ -44,6 +45,8 @@ class InfluxDB extends MetricsPublisher {
 	private final String prefix;
 	private final String tags;
 
+	private final Map<String, String> httpHeaders = Collections.singletonMap("Content-Type",
+			"plain/text");
 	private final DecimalFormat decimalFormat = new DecimalFormat("0.00",
 			DecimalFormatSymbols.getInstance(Locale.US));
 	private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
@@ -85,7 +88,7 @@ class InfluxDB extends MetricsPublisher {
 	}
 
 	@Override
-	synchronized void addValue(String metric, double value) throws IOException {
+	public synchronized void addValue(String metric, double value) throws IOException {
 		// ex curl -i -XPOST 'http://localhost:8086/write?db=mydb&precision=s' --data-binary
 		// 'cpu_load_short,direction=in,host=server01,region=us-west value=2.0 1422568543702'
 		final long timeInSeconds = System.currentTimeMillis() / 1000;
@@ -99,33 +102,11 @@ class InfluxDB extends MetricsPublisher {
 	}
 
 	@Override
-	synchronized void send() throws IOException {
+	public synchronized void send() throws IOException {
 		try {
 			bufferWriter.flush();
-			final HttpURLConnection connection = (HttpURLConnection) influxDbUrl.openConnection();
-			connection.setConnectTimeout(20000);
-			connection.setReadTimeout(60000);
-			connection.setRequestMethod("POST");
-			connection.setRequestProperty("Content-Type", "plain/text");
-			connection.setDoOutput(true);
-			if (influxDbUrl.getUserInfo() != null) {
-				final String authorization = Base64Coder.encodeString(influxDbUrl.getUserInfo());
-				connection.setRequestProperty("Authorization", "Basic " + authorization);
-			}
-			final OutputStream outputStream = connection.getOutputStream();
 			// the stream could be compressed in gzip, with Content-Encoding=gzip
-			buffer.writeTo(outputStream);
-			outputStream.flush();
-
-			final int status = connection.getResponseCode();
-			if (status >= HttpURLConnection.HTTP_BAD_REQUEST) {
-				final ByteArrayOutputStream errorOutputStream = new ByteArrayOutputStream();
-				TransportFormat.pump(connection.getErrorStream(), errorOutputStream);
-				final String msg = "Error connecting to InfluxDB (" + status + "): "
-						+ errorOutputStream.toString("UTF-8");
-				LOG.warn(msg, new IOException(msg));
-			}
-			connection.disconnect();
+			new LabradorRetriever(influxDbUrl, httpHeaders).post(buffer);
 		} catch (final Exception e) {
 			LOG.warn(e.toString(), e);
 		} finally {
@@ -136,7 +117,7 @@ class InfluxDB extends MetricsPublisher {
 	}
 
 	@Override
-	void stop() {
+	public void stop() {
 		// nothing
 	}
 }
